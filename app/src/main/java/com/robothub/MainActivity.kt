@@ -50,9 +50,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private val btPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) vm.start()
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        // vm.start() dipanggil selama BLUETOOTH_CONNECT diberikan;
+        // BLUETOOTH_SCAN bersifat best-effort untuk cancelDiscovery().
+        if (results[Manifest.permission.BLUETOOTH_CONNECT] == true) vm.start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,7 +73,12 @@ class MainActivity : ComponentActivity() {
             ) {
                 vm.start()
             } else {
-                btPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                btPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_SCAN,
+                    )
+                )
             }
         } else {
             vm.start()

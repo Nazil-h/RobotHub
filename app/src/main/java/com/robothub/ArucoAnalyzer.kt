@@ -16,6 +16,8 @@ class ArucoAnalyzer(
 ) : ImageAnalysis.Analyzer {
 
     private val stabilizer = IdStabilizer(requiredFrames = 3)
+    private var lastRejectedLogTime = 0L
+    private var activeDetectorIndex = 0
 
     override fun analyze(image: ImageProxy) {
         try {
@@ -40,9 +42,6 @@ class ArucoAnalyzer(
         val width = image.width
         val height = image.height
         val grayMat = Mat(height, width, CvType.CV_8UC1)
-        val corners = mutableListOf<Mat>()
-        val ids = Mat()
-        val rejected = mutableListOf<Mat>()
 
         try {
             val plane = image.planes[0]
@@ -64,17 +63,55 @@ class ArucoAnalyzer(
             }
 
             grayMat.put(0, 0, yData)
-            ArucoConfig.detector.detectMarkers(grayMat, corners, ids, rejected)
 
-            val seen: Int? = if (!ids.empty()) ids.get(0, 0)[0].toInt() else null
-            stabilizer.update(seen)?.let { stableId ->
-                Log.i("ArucoAnalyzer", "ID stabil: $stableId")
+            val detectors = ArucoConfig.detectors
+            val order = listOf(activeDetectorIndex) + (detectors.indices - activeDetectorIndex)
+
+            var seenId: Int? = null
+            var matchedDictName: String? = null
+            var maxRejected = 0
+
+            for (idx in order) {
+                val d = detectors[idx]
+                val curCorners = mutableListOf<Mat>()
+                val curIds = Mat()
+                val curRejected = mutableListOf<Mat>()
+                try {
+                    d.detector.detectMarkers(grayMat, curCorners, curIds, curRejected)
+                    if (curRejected.size > maxRejected) {
+                        maxRejected = curRejected.size
+                    }
+                    if (!curIds.empty()) {
+                        seenId = curIds.get(0, 0)[0].toInt()
+                        matchedDictName = d.name
+                        activeDetectorIndex = idx
+                        break
+                    }
+                } finally {
+                    curCorners.forEach { it.release() }
+                    curRejected.forEach { it.release() }
+                    curIds.release()
+                }
+            }
+
+            if (seenId != null) {
+                Log.d("ArucoAnalyzer", "Terdeteksi ID: $seenId (Kamus: $matchedDictName)")
+            } else if (maxRejected > 0) {
+                val now = System.currentTimeMillis()
+                if (now - lastRejectedLogTime > 1000L) {
+                    lastRejectedLogTime = now
+                    Log.w(
+                        "ArucoAnalyzer",
+                        "Ada $maxRejected kandidat kotak terdeteksi tapi belum cocok di kamus manapun"
+                    )
+                }
+            }
+
+            stabilizer.update(seenId)?.let { stableId ->
+                Log.i("ArucoAnalyzer", "ID stabil: $stableId (Kamus: $matchedDictName)")
                 onStableId(stableId)
             }
         } finally {
-            corners.forEach { it.release() }
-            rejected.forEach { it.release() }
-            ids.release()
             grayMat.release()
         }
     }
